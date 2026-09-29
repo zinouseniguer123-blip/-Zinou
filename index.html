@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>خلية العمليات</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#f3f4ef;--card:#fff;--tx:#1d2418;--mut:#6b7364;--pri:#4b5d2a;--pri-tx:#fff;--bd:#d9dccf;--danger:#b3261e}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#151812;--card:#1f241a;--tx:#e8ebe0;--mut:#9aa38d;--pri:#8fa65a;--pri-tx:#12150e;--bd:#333a2b;--danger:#f2907f}}
+:root[data-theme="dark"]{--bg:#151812;--card:#1f241a;--tx:#e8ebe0;--mut:#9aa38d;--pri:#8fa65a;--pri-tx:#12150e;--bd:#333a2b;--danger:#f2907f}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:"Segoe UI",Tahoma,"Noto Naskh Arabic",Arial,sans-serif;font-size:15px}
+header{padding:14px 14px 8px;font-weight:700;font-size:18px}
+nav{display:flex;gap:6px;overflow-x:auto;padding:0 14px 8px;position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);z-index:5}
+nav button{flex:none}
+main{padding:6px 14px 40px;max-width:820px;margin:auto}
+button,input,select,textarea{font:inherit;color:var(--tx)}
+button{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:8px 14px;cursor:pointer}
+button.on,button.pri{background:var(--pri);color:var(--pri-tx);border-color:var(--pri)}
+button.del{color:var(--danger)}
+input,select,textarea{width:100%;background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:9px;margin:3px 0 10px}
+label{font-size:13px;color:var(--mut)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin:8px 0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat{font-size:26px;font-weight:700;color:var(--pri)}
+.row{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.mut{color:var(--mut);font-size:13px}
+.tag{display:inline-block;background:var(--bg);border:1px solid var(--bd);border-radius:20px;padding:1px 9px;font-size:12px;margin-inline-end:4px}
+.scroll{overflow-x:auto}
+@media print{nav,button,select,input,textarea{display:none!important}body{background:#fff}.card{break-inside:avoid}}
+.click{cursor:pointer}
+#modal{display:none;position:fixed;inset:0;background:#0008;z-index:99;align-items:center;justify-content:center}
+@media print{#modal{display:none!important}}
+.f2{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}
+</style>
+</head>
+<body>
+<header>🎖️ خلية العمليات</header>
+<nav id="nav"></nav>
+<main id="app"></main>
+<div id="modal"></div>
+<script>
+const UNITS=["اللواء 44","الكتيبة 441","الكتيبة 442","الكتيبة 443","الكتيبة 444","الكتيبة 445","الكتيبة 446","الكتيبة 447","السرية 440"];
+const BLOOD=["","A+","A-","B+","B-","AB+","AB-","O+","O-"];
+const RANKS=["ملازم عامل","ملازم أول","نقيب","رائد","مقدم","عقيد","عميد"];
+const nr=r=>String(r||"").replace(/[أإآ]/g,"ا").replace(/\s+/g," ").trim();
+const RN=RANKS.map(nr);
+const rk=r=>RN.indexOf(nr(r));
+const STATUS=["على رأس العمل","في مهمة","في إجازة"];
+const TABS=[["home","الرئيسية"],["ppl","الأفراد"],["act","الأنشطة"],["find","البحث"],["trash","السلة"],["bak","نسخ احتياطي"]];
+let S={people:[],acts:[]},tab="home",unit=UNITS[0],q="",st="",edit=null,sel="";
+try{const r=localStorage.getItem("b44");if(r)S=JSON.parse(r)}catch(e){}
+S.trash=S.trash||[];
+let ready=false,lastSnap=0,fh=null,chain=Promise.resolve();
+const qq=f=>chain=chain.then(f).catch(()=>{});
+const kv=(m,k,v)=>new Promise((res,rej)=>{const r=indexedDB.open("b44db",1);r.onupgradeneeded=()=>r.result.createObjectStore("kv");r.onerror=()=>rej(r.error);r.onsuccess=()=>{const d=r.result,t=d.transaction("kv",m==="get"?"readonly":"readwrite"),o=t.objectStore("kv"),x=m==="get"?o.get(k):m==="put"?o.put(v,k):o.delete(k);t.oncomplete=()=>{d.close();res(x.result)};t.onerror=()=>rej(t.error)}});
+const pushSnap=async j=>{const a=(await kv("get","snaps"))||[];a.push({at:new Date().toISOString(),j});await kv("put","snaps",a.slice(-20))};
+const save=()=>{const j=JSON.stringify(S);try{localStorage.setItem("b44",j)}catch(e){}if(!ready)return;try{window.disk&&window.disk.save(j)}catch(e){}
+ qq(async()=>{await kv("put","cur",j);if(Date.now()-lastSnap>3e5){lastSnap=Date.now();await pushSnap(j)}});
+ qq(async()=>{if(fh&&await fh.queryPermission({mode:"readwrite"})==="granted"){const w=await fh.createWritable();await w.write(j);await w.close()}})};
+S.people.forEach(p=>{if(p.status&&!STATUS.includes(p.status))p.status=STATUS[0]});save();
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const cnt=(n,t)=>S.acts.filter(a=>a.name===n&&a.type===t).length;
+const filt=()=>S.people.filter(p=>(!unit||p.unit===unit)&&(!st||p.status===st)&&(!q||(p.name+p.reg+p.idn+p.phone).includes(q))).sort((a,b)=>(rk(b.rank)-rk(a.rank))||a.name.localeCompare(b.name,"ar"));
+const day=()=>new Date().toISOString().slice(0,10);
+const $=id=>document.getElementById(id);
+const opts=(a,v)=>a.map(x=>`<option ${x===v?"selected":""}>${esc(x)}</option>`).join("");
+
+function render(){
+ $("nav").innerHTML=TABS.map(([k,t])=>`<button class="${k===tab?"on":""}" onclick="tab='${k}';edit=null;render()">${k==="trash"&&S.trash.length?t+" ("+S.trash.length+")":t}</button>`).join("");
+ $("app").innerHTML=({home,ppl,act,find,trash,bak})[tab]();
+ if(tab==="bak")bakInit();
+}
+function home(){
+ const rows=UNITS.map(u=>{const p=S.people.filter(x=>x.unit===u);return `<div class="card row click" onclick="tab='ppl';unit='${u}';st='';q='';render()"><b>${u}</b><span><span class="stat">${p.length}</span> <span class="mut">فرد</span></span></div>`}).join("");
+ const st=STATUS.map(s=>`<div class="card click" onclick="tab='ppl';unit='';st='${s}';q='';render()"><div class="mut">${s}</div><div class="stat">${S.people.filter(x=>x.status===s).length}</div></div>`).join("");
+ let last="";try{last=localStorage.getItem("b44last")||""}catch(e){}
+ const old=!last||(Date.now()-new Date(last))/864e5>7;
+ const warn=S.people.length&&old?`<div class="card" style="border-color:var(--danger)"><b>⚠️ ${last?"آخر نسخة احتياطية: "+last:"لم تأخذ نسخة احتياطية بعد"}</b><div class="mut">احفظ نسخة لحماية بياناتك.</div><button class="pri" onclick="expJSON();render()">حفظ نسخة الآن</button></div>`:"";
+ return warn+`<div class="card"><div class="mut">إجمالي الأفراد</div><div class="stat">${S.people.length}</div></div>
+ <div class="grid">${st}</div><h3>الوحدات</h3>${rows}
+ <div class="card"><div class="mut">سجل الأنشطة</div><div class="stat">${S.acts.length}</div></div>`;
+}
+function ppl(){
+ if(edit!==null)return form();
+ const list=filt();
+ return `<div class="f2"><select onchange="unit=this.value;render()"><option value="">كل الوحدات</option>${opts(UNITS,unit)}</select><select onchange="st=this.value;render()"><option value="">كل الحالات</option>${opts(STATUS,st)}</select></div>
+ <div class="row"><input placeholder="بحث بالاسم أو الرقم" value="${esc(q)}" oninput="q=this.value;renderList()" style="margin:0"><button class="pri" onclick="edit='';render()">+ إضافة</button></div>
+ <div class="row mut" style="margin-top:8px"><span id="cnt">${list.length} فرد</span><button onclick="window.print()">🖨️ طباعة</button></div><div id="list">${cards(list)}</div>`;
+}
+function cards(list){
+ if(!list.length)return `<p class="mut">لا يوجد أفراد في هذه الوحدة.</p>`;
+ return list.map(p=>`<div class="card"><div class="row"><b>${esc(p.name)}</b><span class="tag">${esc(p.status||"—")}</span></div>
+ <div class="mut">${esc(p.unit)} · ${esc(p.rank)} · ${esc(p.post)}</div>
+ <div class="mut">تسجيل: ${esc(p.reg)} · بطاقة: ${esc(p.idn)} · إصدار: ${esc(p.issue)}</div>
+ <div class="mut">هاتف: <span dir="ltr">${esc(p.phone)}</span> · دم: ${esc(p.blood)}</div>
+ <div class="mut">مهام: ${cnt(p.name,"مهمة")} · محاضرات: ${cnt(p.name,"محاضرة")}</div>
+ ${p.notes?`<div>${esc(p.notes)}</div>`:""}
+ <div class="row" style="margin-top:8px"><button onclick="edit='${p.id}';render()">تعديل</button><button class="del" onclick="delP('${p.id}')">حذف</button></div></div>`).join("");
+}
+function renderList(){const l=filt();$("list").innerHTML=cards(l);$("cnt").textContent=l.length+" فرد"}
+function form(){
+ const p=S.people.find(x=>x.id===edit)||{unit:unit||UNITS[0],status:STATUS[0]};
+ const f=(k,l,t="text",ls="")=>`<div><label>${l}</label><input id="f_${k}" type="${t}" ${ls?`list="${ls}" autocomplete="off"`:""} value="${esc(p[k])}"></div>`;
+ return `<div class="card"><h3>${p.id?"تعديل":"إضافة"} فرد</h3>
+ <label>الوحدة</label><select id="f_unit">${opts(UNITS,p.unit)}</select>
+ ${f("name","الاسم واللقب")}
+ <datalist id="ranks">${RANKS.map(r=>`<option value="${r}">`).join("")}</datalist>
+ <div class="f2">${f("rank","الرتبة","text","ranks")}${f("post","الوظيفة")}${f("reg","رقم التسجيل")}${f("idn","رقم بطاقة التعريف العسكرية")}${f("issue","تاريخ الإصدار","date")}${f("phone","رقم الهاتف","tel")}</div>
+ <div class="f2"><div><label>زمرة الدم</label><select id="f_blood">${opts(BLOOD,p.blood||"")}</select></div>
+ <div><label>الحالة الحالية</label><select id="f_status">${opts(STATUS,p.status)}</select></div></div>
+ <label>ملاحظات</label><textarea id="f_notes" rows="2">${esc(p.notes)}</textarea>
+ <div class="row"><button class="pri" onclick="saveP()">حفظ</button><button onclick="edit=null;render()">إلغاء</button></div></div>`;
+}
+function saveP(){
+ const g=k=>$("f_"+k).value.trim();
+ if(!g("name")){alert("الاسم مطلوب");return}
+ const d={};["unit","name","rank","post","reg","idn","issue","phone","blood","status","notes"].forEach(k=>d[k]=g(k));
+ const old=S.people.find(x=>x.id===edit);
+ if(old){if(old.name!==d.name)S.acts.forEach(a=>{if(a.name===old.name)a.name=d.name});Object.assign(old,d)}
+ else S.people.push({id:uid(),...d});
+ unit=d.unit;save();edit=null;render();
+}
+const hp=s=>{let a=0xdeadbeef,b=0x41c6ce57,c;s="b44|"+s;for(let i=0;i<s.length;i++){c=s.charCodeAt(i);a=Math.imul(a^c,2654435761);b=Math.imul(b^c,1597334677)}a=Math.imul(a^(a>>>16),2246822507)^Math.imul(b^(b>>>13),3266489909);b=Math.imul(b^(b>>>16),2246822507)^Math.imul(a^(a>>>13),3266489909);return(4294967296*(2097151&b)+(a>>>0)).toString(36)};
+function askPw(msg,cb,setup){
+ const m=$("modal");m.style.display="flex";
+ m.innerHTML=`<div class="card" style="width:min(340px,92vw)"><b>${msg}</b><input id="pw1" type="password" placeholder="كلمة السر" style="margin-top:10px">${setup?'<input id="pw2" type="password" placeholder="أعد كتابة كلمة السر">':""}<div class="row"><button class="pri" id="pwok">تأكيد</button><button id="pwno">إلغاء</button></div><div id="pwe" style="color:var(--danger);font-size:13px;margin-top:6px"></div></div>`;
+ const close=()=>{m.style.display="none";m.innerHTML=""},er=t=>$("pwe").textContent=t;
+ $("pwno").onclick=close;
+ const go=()=>{const v=$("pw1").value;
+  if(setup){if(v.length<4)return er("4 أحرف على الأقل");if(v!==$("pw2").value)return er("كلمتا السر غير متطابقتين");S.pw=hp(v);save();close();cb()}
+  else if(hp(v)!==S.pw)er("كلمة السر خاطئة");
+  else{close();cb()}};
+ $("pwok").onclick=go;m.onkeydown=e=>{if(e.key==="Enter")go()};
+ setTimeout(()=>$("pw1").focus(),50);
+}
+const guard=(msg,cb)=>S.pw?askPw(msg,cb):askPw("أنشئ كلمة سر لحماية عمليات الحذف",cb,true);
+function changePw(){S.pw?askPw("أدخل كلمة السر الحالية",()=>askPw("كلمة السر الجديدة",render,true)):askPw("أنشئ كلمة سر",render,true)}
+function toTrash(k,it){S.trash.push({id:uid(),k,it,at:new Date().toISOString()})}
+function delP(id){const p=S.people.find(x=>x.id===id);if(p)guard("أدخل كلمة السر لنقل «"+p.name+"» إلى السلة",()=>{toTrash("p",p);S.people=S.people.filter(x=>x.id!==id);save();render()})}
+
+function act(){
+ const names=[...new Set(S.people.map(p=>p.name))];
+ const rows=[...S.acts].sort((a,b)=>b.date.localeCompare(a.date)).map(a=>`<div class="card"><div class="row"><b>${esc(a.name)}</b><span class="tag">${esc(a.type)}</span></div>
+ <div class="mut">${esc(a.date)} · ${esc(a.place)} · ${esc(a.days)} يوم</div><button class="del" onclick="delA('${a.id}')">حذف</button></div>`).join("");
+ return `<div class="card"><h3>تسجيل نشاط</h3>
+ <label>التاريخ</label><input id="a_date" type="date" value="${new Date().toISOString().slice(0,10)}">
+ <label>اسم الضابط</label><select id="a_name">${opts(names,"")}</select>
+ <label>نوع النشاط</label><select id="a_type"><option>مهمة</option><option>محاضرة</option></select>
+ <label>المكان / الموضوع</label><input id="a_place">
+ <label>المدة بالأيام</label><input id="a_days" type="number" min="1" value="1">
+ <button class="pri" onclick="addA()">إضافة</button>${names.length?"":'<p class="mut">أضف أفراداً أولاً.</p>'}</div>${rows}`;
+}
+function addA(){
+ const a={id:uid(),date:$("a_date").value,name:$("a_name").value,type:$("a_type").value,place:$("a_place").value.trim(),days:$("a_days").value};
+ if(!a.name){alert("اختر ضابطاً");return}
+ S.acts.push(a);save();render();
+}
+function delA(id){const a=S.acts.find(x=>x.id===id);if(a){toTrash("a",a);S.acts=S.acts.filter(x=>x.id!==id);save();render()}}
+
+function find(){
+ const names=[...new Set(S.people.map(p=>p.name))];
+ let out='<p class="mut">ستظهر نتائج البحث هنا</p>';
+ if(sel){
+  const ps=S.people.filter(p=>p.name===sel);
+  const as=S.acts.filter(a=>a.name===sel);
+  out=cards(ps)+`<h3>الأنشطة (${as.length})</h3>`+(as.map(a=>`<div class="card"><span class="tag">${esc(a.type)}</span> ${esc(a.date)} · ${esc(a.place)} · ${esc(a.days)} يوم</div>`).join("")||'<p class="mut">لا أنشطة.</p>');
+ }
+ return `<label>اختر اسم الضابط:</label><select onchange="sel=this.value;render()"><option value="">—</option>${names.map(n=>`<option ${n===sel?"selected":""}>${esc(n)}</option>`).join("")}</select>${out}`;
+}
+function trash(){
+ const rows=[...S.trash].reverse().map(t=>{const i=t.it;
+  const b=t.k==="p"?`<b>${esc(i.name)}</b> <span class="tag">فرد</span><div class="mut">${esc(i.unit)} · ${esc(i.rank)}</div>`:`<b>${esc(i.name)}</b> <span class="tag">${esc(i.type)}</span><div class="mut">${esc(i.date)} · ${esc(i.place)} · ${esc(i.days)} يوم</div>`;
+  return `<div class="card">${b}<div class="mut">حُذف في ${t.at.slice(0,10)}</div><div class="row" style="margin-top:8px"><button class="pri" onclick="restoreT('${t.id}')">↩ استرجاع</button><button class="del" onclick="purgeT('${t.id}')">حذف نهائي</button></div></div>`}).join("");
+ return (S.trash.length?`<div class="row"><span class="mut">${S.trash.length} عنصر محذوف</span><button class="del" onclick="emptyT()">إفراغ السلة</button></div>`:"")+(rows||'<p class="mut">السلة فارغة.</p>');
+}
+function restoreT(id){const t=S.trash.find(x=>x.id===id);if(!t)return;(t.k==="p"?S.people:S.acts).push(t.it);S.trash=S.trash.filter(x=>x.id!==id);save();render()}
+function purgeT(id){if(confirm("حذف نهائي؟ لا يمكن التراجع."))guard("أدخل كلمة السر للحذف النهائي",()=>{S.trash=S.trash.filter(x=>x.id!==id);save();render()})}
+function emptyT(){if(confirm("إفراغ السلة نهائياً؟ لا يمكن التراجع."))guard("أدخل كلمة السر لإفراغ السلة",()=>{S.trash=[];save();render()})}
+function bak(){
+ return `<div class="card"><h3>نسخ احتياطي</h3>
+ <button class="pri" onclick="expJSON();render()" style="width:100%;margin-bottom:8px">💾 حفظ نسخة احتياطية (ملف)</button>
+ <label>استرجاع من ملف نسخة سابقة</label><input type="file" accept=".json" onchange="impFile(this)">
+ <button onclick="expCSV()" style="width:100%;margin:4px 0 8px">📊 تصدير الأفراد إلى Excel</button>
+ <div class="card"><b>🛡️ الحماية الداخلية</b>
+ <p class="mut">تُحفظ بياناتك تلقائياً في نسختين داخل الجهاز، مع آخر 20 نسخة يمكن الرجوع إليها.</p><div id="snaps"></div>
+ <div class="mut" style="margin:8px 0">الحفظ التلقائي في ملف على الحاسوب: <span id="fstate"></span></div>
+ <button onclick="linkFile()" style="width:100%">🔗 ربط ملف للحفظ التلقائي</button></div>
+ <details><summary class="mut">استرجاع بالنص (الطريقة القديمة)</summary>
+ <textarea id="bk" rows="6" dir="ltr">${esc(JSON.stringify(S))}</textarea><button onclick="restore()">استرجاع</button></details>
+ <button onclick="changePw()" style="width:100%">🔒 ${S.pw?"تغيير كلمة السر":"تعيين كلمة سر"}</button>
+ <button class="del" onclick="wipe()" style="margin-top:10px">مسح كل البيانات</button>
+ <p class="mut">البيانات محفوظة على هذا الجهاز فقط ولا تُشارك مع أحد.</p></div>`;
+}
+function dl(n,t,m){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([t],{type:m}));a.download=n;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500)}
+function expJSON(){dl("brigade44-"+day()+".json",JSON.stringify(S),"application/json");try{localStorage.setItem("b44last",day())}catch(e){}}
+function expCSV(){
+ const H=[["unit","الوحدة"],["name","الاسم"],["rank","الرتبة"],["post","الوظيفة"],["reg","رقم التسجيل"],["idn","رقم البطاقة"],["issue","تاريخ الإصدار"],["phone","الهاتف"],["blood","الدم"],["status","الحالة"],["notes","ملاحظات"]];
+ const T=["reg","idn","phone"],c=(v,k)=>T.includes(k)&&v?`="${v}"`:`"${String(v??"").replace(/"/g,'""')}"`;
+ const rows=[H.map(h=>`"${h[1]}"`).concat(['"مهام"','"محاضرات"']).join(","),...S.people.map(p=>H.map(h=>c(p[h[0]],h[0])).concat([cnt(p.name,"مهمة"),cnt(p.name,"محاضرة")]).join(","))];
+ dl("afrad-"+day()+".csv","\ufeff"+rows.join("\r\n"),"text/csv");
+}
+function impFile(i){const f=i.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!Array.isArray(d.people)||!Array.isArray(d.acts))throw 0;if(!confirm("سيتم استبدال البيانات الحالية. متابعة؟"))return;applyB(d)}catch(e){alert("الملف غير صالح")}};r.readAsText(f)}
+const applyB=d=>{const go=()=>{if(ready){const j0=JSON.stringify(S);qq(()=>pushSnap(j0))}const o=S.pw;S=d;S.trash=S.trash||[];S.pw=S.pw||o;save();render();alert("تم الاسترجاع")};S.pw?askPw("أدخل كلمة السر للاسترجاع",go):go()};
+function restore(){try{const d=JSON.parse($("bk").value);if(!Array.isArray(d.people)||!Array.isArray(d.acts))throw 0;applyB(d)}catch(e){alert("النص غير صالح")}}
+function wipe(){if(confirm("سيتم حذف كل البيانات نهائياً. متابعة؟"))guard("أدخل كلمة السر لمسح كل البيانات",()=>{S={people:[],acts:[],trash:[],pw:S.pw};save();lastSnap=Date.now();qq(()=>kv("del","snaps"));render()})}
+render();
+async function bakInit(){
+ try{const a=(await kv("get","snaps"))||[],el=$("snaps");if(el)el.innerHTML=a.length?[...a].reverse().map((x,i)=>{let n=0;try{n=JSON.parse(x.j).people.length}catch(e){}return `<div class="card row"><span>${x.at.slice(0,16).replace("T"," ")} · ${n} فرد</span><button onclick="useSnap(${a.length-1-i})">استرجاع</button></div>`}).join(""):'<p class="mut">لا توجد نسخ داخلية بعد.</p>'}catch(e){}
+ fileState();
+}
+async function useSnap(i){try{const a=(await kv("get","snaps"))||[],d=JSON.parse(a[i].j);if(confirm("سيتم استبدال البيانات الحالية بهذه النسخة. متابعة؟"))applyB(d)}catch(e){alert("تعذر الاسترجاع")}}
+async function linkFile(){
+ if(!window.showSaveFilePicker){alert("متصفحك لا يدعم هذه الميزة. استخدم Chrome أو Edge.");return}
+ try{fh=await showSaveFilePicker({suggestedName:"brigade44-live.json",types:[{description:"JSON",accept:{"application/json":[".json"]}}]});await kv("put","fh",fh);save()}catch(e){}
+ fileState();
+}
+async function fileState(){const el=$("fstate");if(!el)return;
+ if(!fh){el.textContent="غير مربوط";return}
+ let p="prompt";try{p=await fh.queryPermission({mode:"readwrite"})}catch(e){}
+ el.innerHTML=p==="granted"?"✅ مفعّل: "+esc(fh.name):'⚠️ يحتاج تفعيلاً <button onclick="reauth()">تفعيل</button>';
+}
+async function reauth(){try{if(await fh.requestPermission({mode:"readwrite"})==="granted")save()}catch(e){}fileState()}
+document.addEventListener("pointerdown",async()=>{if(fh)try{if(await fh.queryPermission({mode:"readwrite"})!=="granted"&&await fh.requestPermission({mode:"readwrite"})==="granted")save()}catch(e){}},{once:true});
+(async()=>{let rest=false;try{
+ if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
+ const ok=j=>{try{const d=JSON.parse(j);if(Array.isArray(d.people)&&Array.isArray(d.acts)&&(d.people.length||d.acts.length))return d}catch(e){}};
+ if(window.disk){try{const dj=await window.disk.load();const dd=dj&&ok(dj);if(dd){S=dd;S.trash=S.trash||[]}}catch(e){}}
+ const empty=!S.people.length&&!S.acts.length,c=await kv("get","cur"),a=(await kv("get","snaps"))||[];
+ if(empty){let d=c&&ok(c);for(let i=a.length-1;!d&&i>=0;i--)d=ok(a[i].j);if(d){S=d;S.trash=S.trash||[];rest=true}}
+ if(a.length)lastSnap=new Date(a[a.length-1].at).getTime();
+ fh=(await kv("get","fh"))||null;
+}catch(e){}
+ ready=true;save();render();if(rest)alert("تم استرجاع بياناتك تلقائياً من النسخة الداخلية");
+})();
+</script>
+</body>
+</html>

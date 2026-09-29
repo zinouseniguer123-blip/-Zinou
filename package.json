@@ -1,0 +1,46 @@
+{
+  "name": "opscell-desktop",
+  "version": "1.0.0",
+  "description": "خلية العمليات - تطبيق سطح مكتب لإدارة بيانات الأفراد والأنشطة",
+  "main": "main.js",
+  "author": "OpsCell",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^38.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "dz.opscell.desktop",
+    "productName": "خلية العمليات",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "خلية العمليات"
+    }
+  }
+}
